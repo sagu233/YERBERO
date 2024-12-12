@@ -1,0 +1,125 @@
+#include <ESP32Servo.h> // Biblioteca para controlar servos con el ESP32
+
+// Pines
+const int pinServo = 33;    // Pin del servo (D33)
+const int pinBoton = 35;    // Pin donde se conecta el botón
+const int triggerPin = 4;   // Pin TRIG del sensor ultrasónico (D4)
+const int echoPin = 16;     // Pin ECHO del sensor ultrasónico (D16)
+
+// Parámetros del sistema
+const int anguloAbierto = 90; // Ángulo al que se abre el servo (90 grados)
+const int anguloCerrado = 0;  // Ángulo al que se cierra el servo (0 grados)
+
+// Distancias de umbral (en cm)
+const int distanciaApertura = 15;  // Distancia máxima para abrir el servo (mate vacío)
+const int distanciaCierre = 5;     // Distancia mínima para cerrar el servo (mate lleno)
+const int cambioBruscoUmbral = 15; // Umbral de cambio brusco en distancia (en cm)
+
+// Variables globales
+Servo servo; // Objeto para controlar el servo
+bool tapaAbierta = false; // Estado actual de la tapa (abierta o cerrada)
+long ultimaMedicion = 0;  // Última distancia medida
+long medicionActual = 0;  // Distancia medida en el ciclo actual
+
+void setup() {
+  Serial.begin(9600); // Configurar comunicación serial a 9600 baudios
+
+  // Configuración de los pines
+  pinMode(triggerPin, OUTPUT);   // Pin del trigger como salida
+  pinMode(echoPin, INPUT);       // Pin del echo como entrada
+  pinMode(pinBoton, INPUT_PULLUP); // Botón configurado con resistencia pull-up interna
+
+  // Configurar el servo y cerrar la tapa al inicio
+  servo.attach(pinServo);
+  servo.write(anguloCerrado); 
+  Serial.println("Sistema inicializado. Tapa cerrada.");
+}
+
+void loop() {
+  // Leer el estado del botón (LOW cuando está presionado)
+  int estadoBoton = digitalRead(pinBoton);
+  
+  // Si el botón está presionado, realizar mediciones
+  if (estadoBoton == LOW) {
+    if (ultimaMedicion == -1) {  // Para evitar múltiples mensajes al detectar el mismo evento
+      Serial.println("Botón presionado.");
+      ultimaMedicion = 0; // Resetear estado
+    }
+
+    // Medir distancia usando el sensor ultrasónico
+    medicionActual = medirDistancia();
+
+    // Mostrar la distancia medida en el monitor serial
+    Serial.print("Distancia medida: ");
+    Serial.print(medicionActual);
+    Serial.println(" cm");
+
+    // Detectar cambios bruscos en la distancia y cerrar la tapa si ocurre
+    if (abs(medicionActual - ultimaMedicion) > cambioBruscoUmbral) {
+      if (tapaAbierta) {
+        cerrarServo();
+        tapaAbierta = false;
+        Serial.println("Servo: Tapa cerrada debido a cambio brusco.");
+      }
+    }
+
+    // Abrir la tapa si la distancia está en el rango adecuado y el botón está presionado
+    if (medicionActual <= distanciaApertura && medicionActual > distanciaCierre) {
+      if (!tapaAbierta) {
+        abrirServo();
+        tapaAbierta = true;
+        Serial.println("Servo: Tapa abierta. ¡Empieza a dispensar yerba!");
+      }
+    } 
+    // Cerrar la tapa si la distancia indica que el mate está lleno
+    else if (medicionActual <= distanciaCierre) {
+      if (tapaAbierta) {
+        cerrarServo();
+        tapaAbierta = false;
+        Serial.println("Servo: Tapa cerrada.");
+        delay(1000); // Pausa antes de reiniciar
+        ESP.restart(); // Reiniciar el sistema
+      }
+    }
+
+    // Actualizar la última medición de distancia
+    ultimaMedicion = medicionActual;
+  } 
+  else {
+    // Si el botón no está presionado, indicar que el sistema está en espera
+    if (ultimaMedicion != -1) {  // Cambiar estado al soltar el botón
+      Serial.println("Botón liberado.");
+      ultimaMedicion = -1;  // Reiniciar para el próximo ciclo
+    }
+  }
+
+  delay(500); // Pausa para evitar lecturas muy rápidas
+}
+
+// Función para medir distancia con el sensor ultrasónico
+int medirDistancia() {
+  digitalWrite(triggerPin, LOW); // Asegurar que el pin TRIG está en LOW
+  delayMicroseconds(2);
+  digitalWrite(triggerPin, HIGH); // Generar un pulso de 10 microsegundos en TRIG
+  delayMicroseconds(10);
+  digitalWrite(triggerPin, LOW);
+
+  // Leer el tiempo que tarda el pulso en ECHO
+  long duracion = pulseIn(echoPin, HIGH);
+
+  // Calcular la distancia en cm
+  int distancia = duracion * 0.034 / 2;
+  return distancia;
+}
+
+// Función para abrir el servo
+void abrirServo() {
+  servo.write(anguloAbierto); // Mover el servo al ángulo de apertura
+  Serial.println("Servo: Tapa abierta.");
+}
+
+// Función para cerrar el servo
+void cerrarServo() {
+  servo.write(anguloCerrado); // Mover el servo al ángulo de cierre
+  Serial.println("Servo: Tapa cerrada.");
+}
